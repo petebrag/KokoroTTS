@@ -4,6 +4,9 @@ on:
   push:
     tags:
       - 'v*'
+    branches:
+      - '**'
+  workflow_dispatch:
 
 jobs:
   build:
@@ -12,11 +15,28 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: List LFS objects
+        run: git lfs ls-files -l | cut -d' ' -f1 | sort > .lfs-assets-id
+
+      - name: Restore LFS cache
+        uses: actions/cache@v4
         with:
-          lfs: true
+          path: .git/lfs
+          key: lfs-${{ hashFiles('.lfs-assets-id') }}
 
       - name: Checkout LFS objects
         run: git lfs pull
+
+      - name: Verify LFS model downloaded
+        run: |
+          # A file that is still an LFS pointer is only ~130 bytes.
+          size=$(stat -f%z Resources/kokoro-v1_0.safetensors)
+          echo "kokoro-v1_0.safetensors: $size bytes"
+          if [ "$size" -lt 300000000 ]; then
+            echo "::error::Model is not downloaded (still an LFS pointer?)"
+            exit 1
+          fi
 
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode_26.2.app/Contents/Developer
@@ -32,7 +52,28 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO
 
+      - name: Ad-hoc sign and show bundle details
+        run: |
+          APP=build/Build/Products/Release/KokoroTTS.app
+          codesign --force --deep -s - "$APP"
+          codesign -dv "$APP" 2>&1 | grep -E "Identifier|Signature"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c "Print :NSServices" "$APP/Contents/Info.plist"
+          find "$APP" -name kokoro-v1_0.safetensors -exec ls -l {} \;
+
+      - name: Zip application
+        run: ditto -c -k --keepParent build/Build/Products/Release/KokoroTTS.app KokoroTTS.app.zip
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: KokoroTTS-${{ github.ref_name }}-${{ github.sha }}
+          path: KokoroTTS.app.zip
+          retention-days: 14
+
       - name: Create DMG
+        if: startsWith(github.ref, 'refs/tags/')
         run: |
           # Create a temporary directory for DMG contents
           mkdir -p dmg-contents
@@ -46,6 +87,7 @@ jobs:
             KokoroTTS.dmg
 
       - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: KokoroTTS.dmg

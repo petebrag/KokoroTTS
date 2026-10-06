@@ -24,6 +24,9 @@ struct ContentView: View {
   /// Prevents re-triggering auto-scroll during an ongoing scroll animation
   @State private var recentlyScrolled = false
 
+  /// Size of the text area and controls (Small / Medium / Large), remembered across launches
+  @AppStorage(TextSize.storageKey) private var textSize: TextSize = TextSize.defaultValue
+
   /// Returns the flag emoji for a voice based on its two-letter language/gender code prefix.
   /// Format: first letter = language (a=American, b=British), second letter = gender (f=female, m=male)
   private func flagForVoice(_ voice: String) -> String {
@@ -359,14 +362,14 @@ struct ContentView: View {
             ScrollView {
               ZStack(alignment: .topLeading) {
                 Text(highlightedText())
-                  .font(.body)
+                  .font(textSize.bodyFont)
                   .frame(maxWidth: .infinity, alignment: .leading)
                   .padding(.horizontal, 5)
 
                 // Invisible copy of text up to the current token, used only
                 // to position the scroll anchor at the current highlight
                 Text(textUpToCurrentToken())
-                  .font(.body)
+                  .font(textSize.bodyFont)
                   .frame(maxWidth: .infinity, alignment: .leading)
                   .padding(.horizontal, 5)
                   .hidden()
@@ -414,7 +417,7 @@ struct ContentView: View {
         } else {
           // Show editable text editor
           TextEditor(text: $viewModel.inputText)
-            .font(.body)
+            .font(textSize.bodyFont)
             .padding(8)
             .scrollContentBackground(.hidden)
             .background(Color(nsColor: .textBackgroundColor))
@@ -427,7 +430,7 @@ struct ContentView: View {
             .overlay(alignment: .topLeading) {
               if viewModel.inputText.isEmpty {
                 Text("Type something to say...")
-                  .font(.body)
+                  .font(textSize.bodyFont)
                   .foregroundColor(Color(nsColor: .placeholderTextColor))
                   .padding(.horizontal, 13)
                   .padding(.vertical, 8)
@@ -448,6 +451,7 @@ struct ContentView: View {
       // Voice selection picker and rating
       HStack {
         Text("Voice:")
+          .font(textSize.controlFont)
           .foregroundColor(Color(nsColor: .labelColor))
         Picker("", selection: $viewModel.selectedVoice) {
           ForEach(viewModel.voiceNames, id: \.self) { voice in
@@ -456,6 +460,7 @@ struct ContentView: View {
           }
         }
         .pickerStyle(.menu)
+        .controlSize(textSize.controlSize)
         .frame(minWidth: 150)
 
         Spacer()
@@ -463,6 +468,7 @@ struct ContentView: View {
         // Star rating for selected voice
         HStack(spacing: 4) {
           Text("Rating:")
+            .font(textSize.controlFont)
             .foregroundColor(Color(nsColor: .labelColor))
           HStack(spacing: 4) {
             ForEach(1...5, id: \.self) { star in
@@ -476,6 +482,7 @@ struct ContentView: View {
                 }
               } label: {
                 Image(systemName: isHighlighted ? "star.fill" : "star")
+                  .font(textSize.controlFont)
                   .foregroundColor(isHighlighted ? .yellow : Color(nsColor: .tertiaryLabelColor))
               }
               .buttonStyle(.plain)
@@ -497,16 +504,36 @@ struct ContentView: View {
       // Speed control
       HStack {
         Text("Speed:")
+          .font(textSize.controlFont)
           .foregroundColor(Color(nsColor: .labelColor))
         Slider(value: Binding(
           get: { Double(viewModel.speechSpeed) },
           set: { viewModel.speechSpeed = Float($0) }
         ), in: 0.5...2.0, step: 0.1)
+        .controlSize(textSize.controlSize)
         .frame(width: 150)
         Text(String(format: "%.1fx", viewModel.speechSpeed))
+          .font(textSize.controlFont)
           .foregroundColor(Color(nsColor: .secondaryLabelColor))
           .monospacedDigit()
-          .frame(width: 40)
+          .frame(width: 40 * textSize.controlScale)
+        Spacer()
+      }
+
+      // Text size control
+      HStack {
+        Text("Text size:")
+          .font(textSize.controlFont)
+          .foregroundColor(Color(nsColor: .labelColor))
+        Picker("", selection: $textSize) {
+          ForEach(TextSize.allCases) { size in
+            Text(size.label).tag(size)
+          }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .controlSize(textSize.controlSize)
+        .fixedSize()
         Spacer()
       }
 
@@ -515,10 +542,10 @@ struct ContentView: View {
         // Seek slider
         HStack(spacing: 12) {
           Text(formatTime(viewModel.currentTime))
-            .font(.caption)
+            .font(.system(size: NSFont.smallSystemFontSize * textSize.controlScale))
             .monospacedDigit()
             .foregroundColor(Color(nsColor: .secondaryLabelColor))
-            .frame(width: 45, alignment: .trailing)
+            .frame(width: 45 * textSize.controlScale, alignment: .trailing)
 
           Slider(
             value: Binding(
@@ -532,13 +559,14 @@ struct ContentView: View {
             ),
             in: 0...max(viewModel.totalDuration, 0.01)
           )
+          .controlSize(textSize.controlSize)
           .disabled(!viewModel.hasAudio)
 
           Text(formatTime(viewModel.totalDuration))
-            .font(.caption)
+            .font(.system(size: NSFont.smallSystemFontSize * textSize.controlScale))
             .monospacedDigit()
             .foregroundColor(Color(nsColor: .secondaryLabelColor))
-            .frame(width: 45, alignment: .leading)
+            .frame(width: 45 * textSize.controlScale, alignment: .leading)
         }
 
         // Playback buttons
@@ -553,7 +581,7 @@ struct ContentView: View {
               viewModel.seek(to: 0)
             } label: {
               Image(systemName: "backward.end.fill")
-                .font(.title2)
+                .font(.system(size: 17 * textSize.controlScale))
                 .help("Back to start")
             }
             .buttonStyle(.plain)
@@ -575,7 +603,7 @@ struct ContentView: View {
               }
             } label: {
               Image(systemName: viewModel.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                .font(.largeTitle)
+                .font(.system(size: 26 * textSize.controlScale))
                 .help(viewModel.hasAudio ? (viewModel.isPlaying ? "Pause" : "Play") : "Generate and play audio")
             }
             .buttonStyle(.plain)
@@ -588,7 +616,7 @@ struct ContentView: View {
                 viewModel.cancelGeneration()
               } label: {
                 Image(systemName: "hand.raised.fill")
-                  .font(.title2)
+                  .font(.system(size: 17 * textSize.controlScale))
                   .help("Stop generating audio")
               }
               .buttonStyle(.plain)
@@ -604,7 +632,7 @@ struct ContentView: View {
             saveAudio()
           } label: {
             Image(systemName: "square.and.arrow.down")
-              .font(.title2)
+              .font(.system(size: 17 * textSize.controlScale))
               .help(!viewModel.hasAudio ? "Generate audio before saving to file" : (viewModel.isGeneratingAudio ? "Wait for audio generation to complete" : "Save audio to file"))
           }
           .buttonStyle(.plain)
