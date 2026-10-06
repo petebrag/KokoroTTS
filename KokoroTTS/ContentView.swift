@@ -649,15 +649,14 @@ struct ContentView: View {
     }
     .onChange(of: viewModel.selectedVoice) {
       // Clear audio when voice changes so play button regenerates
-      if viewModel.hasAudio {
+      // But not if audio is being generated (a Service request may set the voice first)
+      if viewModel.hasAudio && !viewModel.isGeneratingAudio {
         viewModel.clearAudio()
       }
     }
     .onChange(of: viewModel.speechSpeed) {
-      // Clear audio when speed changes so play button regenerates
-      if viewModel.hasAudio {
-        viewModel.clearAudio()
-      }
+      // Keep playing at the new speed; the next text is generated at it
+      viewModel.applySpeedToPlayback()
     }
     .onChange(of: viewModel.isPlaying) { oldValue, newValue in
       // Reset editing mode when playback starts (including from service)

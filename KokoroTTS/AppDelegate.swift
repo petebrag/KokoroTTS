@@ -187,6 +187,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
     }
   }
 
+  /// Brings the main window on screen (unhiding the app if needed) without activating it,
+  /// so the text being read is visible while the sending app keeps the keyboard focus.
+  private func revealMainWindow() {
+    guard let window = resolveMainWindow() else { return }
+    NSApp.unhideWithoutActivation()
+    window.orderFrontRegardless()
+  }
+
   @objc private func toggleAutoStart(_ sender: NSMenuItem) {
     let enabled = !isAutoStartEnabled()
     setAutoStart(enabled: enabled)
@@ -277,6 +285,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
 
     // Set the text in the input field and speak it
     DispatchQueue.main.async { [self] in
+      // kokoro-speak saves the shared voice and speed before sending text
+      model.reloadSharedSettings()
       model.inputMarkdown = inputMarkdown
       model.inputText = text
       model.say(text)
@@ -292,6 +302,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
         if !wasActive {
           NSApp.setActivationPolicy(.regular)
         }
+
+        // Show the reading, without taking focus from the app that sent the text
+        revealMainWindow()
       }
     }
   }

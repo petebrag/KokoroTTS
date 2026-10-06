@@ -29,6 +29,13 @@ final class KokoroTTSModel: ObservableObject {
   /// The audio player node attached to the audio engine
   let playerNode: AVAudioPlayerNode!
 
+  /// Time-stretches playback so a speed change applies at once, without regenerating
+  /// the audio and without changing pitch. Its rate is speechSpeed / generatedSpeed.
+  let timePitch = AVAudioUnitTimePitch()
+
+  /// The speed the current audio was generated at
+  var generatedSpeed: Float = 1.0
+
   /// Dictionary of available voices, mapped by voice name to MLX array data
   let voices: [String: MLXArray]
 
@@ -124,6 +131,7 @@ final class KokoroTTSModel: ObservableObject {
     audioEngine = AVAudioEngine()
     playerNode = AVAudioPlayerNode()
     audioEngine.attach(playerNode)
+    audioEngine.attach(timePitch)
 
     // Load voice data from NPZ file
     let voiceFilePath = Bundle.main.url(forResource: "voices", withExtension: "npz")!
@@ -178,6 +186,20 @@ final class KokoroTTSModel: ObservableObject {
     }
   }
 
+  /// Re-reads the voice and speed saved in UserDefaults. kokoro-speak writes them there as
+  /// the shared setting, so each Service request picks them up without a restart.
+  func reloadSharedSettings() {
+    CFPreferencesAppSynchronize(kCFPreferencesCurrentApplication)
+    if let savedVoice = UserDefaults.standard.string(forKey: Self.selectedVoiceKey),
+       voiceNames.contains(savedVoice), savedVoice != selectedVoice {
+      selectedVoice = savedVoice
+    }
+    let savedSpeed = UserDefaults.standard.float(forKey: Self.speechSpeedKey)
+    if savedSpeed > 0, savedSpeed != speechSpeed {
+      speechSpeed = savedSpeed
+    }
+  }
+
   /// Converts the provided text to speech and plays it through the audio engine.
   /// Text is split into chunks to work around token limits.
   /// - Parameter text: The text to be converted to speech
@@ -201,8 +223,11 @@ final class KokoroTTSModel: ObservableObject {
     let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1)!
     audioFormat = format
 
-    // Connect the player node to the audio engine's mixer
-    audioEngine.connect(playerNode, to: audioEngine.mainMixerNode, format: format)
+    // Connect the player node to the audio engine's mixer through the time-stretch unit
+    audioEngine.connect(playerNode, to: timePitch, format: format)
+    audioEngine.connect(timePitch, to: audioEngine.mainMixerNode, format: format)
+    generatedSpeed = speechSpeed
+    timePitch.rate = 1.0
 
     // Request a larger buffer size to reduce audio overload warnings during heavy CPU load
     let outputUnit = audioEngine.outputNode.audioUnit!

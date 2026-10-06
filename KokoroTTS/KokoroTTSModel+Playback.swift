@@ -9,9 +9,9 @@ extension KokoroTTSModel {
     guard isPlaying else { return }
     playerNode.pause()
     isPlaying = false
-    // Save current position
+    // Save current position (audio time advances at the playback rate)
     if let startTime = playbackStartTime {
-      playbackStartPosition += Date().timeIntervalSince(startTime)
+      playbackStartPosition += Date().timeIntervalSince(startTime) * playbackRate
     }
     playbackStartTime = nil
     updateNowPlayingInfo()
@@ -92,6 +92,22 @@ extension KokoroTTSModel {
     currentTokenIndex = -1
   }
 
+  /// How fast audio time passes per second of wall time (1.0 = as generated)
+  var playbackRate: Double { Double(timePitch.rate) }
+
+  /// Applies a speed change to the audio already generated, without stopping: playback
+  /// continues from the same word, faster or slower. New text is generated at the new speed.
+  func applySpeedToPlayback() {
+    guard hasAudio, generatedSpeed > 0 else { return }
+    // Bank the audio time played so far at the old rate before switching.
+    if isPlaying, let startTime = playbackStartTime {
+      playbackStartPosition += Date().timeIntervalSince(startTime) * playbackRate
+      playbackStartTime = Date()
+    }
+    timePitch.rate = max(0.25, min(4.0, speechSpeed / generatedSpeed))
+    updateNowPlayingInfo()
+  }
+
   /// Cancels ongoing audio generation but keeps existing audio
   func cancelGeneration() {
     shouldCancelGeneration = true
@@ -151,7 +167,7 @@ extension KokoroTTSModel {
 
       // Update current time based on actual elapsed time
       if self.isPlaying, let startTime = self.playbackStartTime {
-        self.currentTime = self.playbackStartPosition + Date().timeIntervalSince(startTime)
+        self.currentTime = self.playbackStartPosition + Date().timeIntervalSince(startTime) * self.playbackRate
       }
 
       // Check if playback finished naturally

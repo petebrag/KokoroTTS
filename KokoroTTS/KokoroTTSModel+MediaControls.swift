@@ -103,7 +103,7 @@ extension KokoroTTSModel {
     nowPlayingInfo[MPMediaItemPropertyArtist] = displayNameForVoice(selectedVoice)
     nowPlayingInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] = currentTime
     nowPlayingInfo[MPMediaItemPropertyPlaybackDuration] = totalDuration
-    nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
+    nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? playbackRate : 0.0
 
     infoCenter.nowPlayingInfo = nowPlayingInfo
   }
