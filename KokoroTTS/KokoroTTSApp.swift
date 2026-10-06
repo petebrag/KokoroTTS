@@ -12,6 +12,10 @@ struct KokoroTestApp: App {
         .frame(minWidth: 350, minHeight: 300)
     }
     .defaultSize(width: 1100, height: 1000)
+    // Always create the window at launch, even when it was closed last time or the app
+    // starts hidden: a Service request must be able to show it (see revealMainWindow).
+    .defaultLaunchBehavior(.presented)
+    .restorationBehavior(.disabled)
     .commands {
       CommandGroup(replacing: .appInfo) {
         Button(String(localized: "About Kokoro TTS")) {

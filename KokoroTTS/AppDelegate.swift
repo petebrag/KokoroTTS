@@ -70,11 +70,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
   // MARK: - Window Delegate
 
   func windowShouldClose(_ sender: NSWindow) -> Bool {
-    if UserDefaults.standard.bool(forKey: hideFromDockKey) {
-      sender.orderOut(nil)
-      return false
-    }
-    return true
+    // Hide instead of closing, so the window still exists when the next Service request
+    // shows it, or the Dock icon / "Show Window" brings it back.
+    sender.orderOut(nil)
+    return false
   }
 
   func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
