@@ -38,6 +38,10 @@ final class KokoroTTSModel: ObservableObject {
   /// The text input from the user (shared with UI and Services)
   @Published var inputText: String = ""
 
+  /// Speech-ready Markdown from kokoro-speak for the current input, if any. The window
+  /// renders it only while `inputText` still equals its speech text (see MarkdownDocument).
+  @Published var inputMarkdown: String?
+
   /// The currently selected voice name
   @Published var selectedVoice: String = "" {
     didSet {

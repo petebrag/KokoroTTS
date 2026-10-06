@@ -20,7 +20,7 @@ struct KokoroTestApp: App {
             .applicationName: "Kokoro TTS",
             .version: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0",
             .credits: NSAttributedString(
-              string: "GitHub: https://github.com/kjyv/KokoroTTS",
+              string: "GitHub: https://github.com/kjyv/KokoroTTS" + buildLabel,
               attributes: [
                 .link: URL(string: "https://github.com/kjyv/KokoroTTS")!,
                 .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
@@ -82,4 +82,14 @@ struct TextSizeMenu: View {
 
     Divider()
   }
+}
+
+/// Branch and commit stamped into Info.plist by the CI build (KokoroBuildBranch,
+/// KokoroBuildCommit), shown in the About panel so the installed test build is identifiable.
+/// Empty for builds that were not stamped.
+private var buildLabel: String {
+  let info = Bundle.main.infoDictionary ?? [:]
+  guard let branch = info["KokoroBuildBranch"] as? String,
+        let commit = info["KokoroBuildCommit"] as? String else { return "" }
+  return "\nFork: https://github.com/petebrag/KokoroTTS\nBuild: \(branch) @ \(commit)"
 }

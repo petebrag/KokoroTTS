@@ -52,9 +52,12 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO
 
-      - name: Ad-hoc sign and show bundle details
+      - name: Stamp build, ad-hoc sign and show bundle details
         run: |
           APP=build/Build/Products/Release/KokoroTTS.app
+          # Shown in the About panel so the installed test build is identifiable.
+          /usr/libexec/PlistBuddy -c "Add :KokoroBuildBranch string ${GITHUB_REF_NAME}" "$APP/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c "Add :KokoroBuildCommit string ${GITHUB_SHA::7}" "$APP/Contents/Info.plist"
           codesign --force --deep -s - "$APP"
           codesign -dv "$APP" 2>&1 | grep -E "Identifier|Signature"
           /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP/Contents/Info.plist"

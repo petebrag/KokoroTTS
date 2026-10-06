@@ -37,8 +37,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
     // Register this object as a service provider
     NSApp.servicesProvider = self
 
-    // Register the types we accept for services (RTF for headline detection, string as fallback)
-    NSApp.registerServicesMenuSendTypes([.rtf, .string], returnTypes: [])
+    // Register the types we accept for services (RTF for headline detection, Markdown from
+    // kokoro-speak for formatted display, string as fallback)
+    NSApp.registerServicesMenuSendTypes([.rtf, .string, MarkdownDocument.pasteboardType], returnTypes: [])
 
     // Update the Services menu
     NSUpdateDynamicServices()
@@ -252,8 +253,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
       savedWindowFrames[window] = window.frame
     }
 
-    // Extract text from pasteboard (tries RTF headline detection first, then plain text)
-    guard let text = PasteboardHelper.extractText(from: pboard) else {
+    // Markdown from kokoro-speak: show it formatted and speak the text derived from it.
+    // Without it, extract text as before (RTF headline detection first, then plain text).
+    let markdown = pboard.string(forType: MarkdownDocument.pasteboardType)
+    let document = markdown.flatMap { MarkdownDocument(markdown: $0) }
+    let text: String
+    let inputMarkdown: String?
+    if let document, !document.speech.isEmpty {
+      text = document.speech
+      inputMarkdown = markdown
+    } else if let extracted = PasteboardHelper.extractText(from: pboard) {
+      text = extracted
+      inputMarkdown = nil
+    } else {
       error.pointee = "No text was provided" as NSString
       return
     }
@@ -265,6 +277,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
 
     // Set the text in the input field and speak it
     DispatchQueue.main.async { [self] in
+      model.inputMarkdown = inputMarkdown
       model.inputText = text
       model.say(text)
 

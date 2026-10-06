@@ -86,105 +86,76 @@ struct ContentView: View {
     return String(format: "%d:%02d", minutes, seconds)
   }
 
-  /// Normalizes Unicode quotation marks to ASCII equivalents so token text from the TTS engine
-  /// can be matched against the original input even when it contains smart quotes.
-  private static func normalizeQuotes(_ text: String) -> String {
-    text.replacingOccurrences(of: "\u{2018}", with: "'")
-      .replacingOccurrences(of: "\u{2019}", with: "'")
-      .replacingOccurrences(of: "\u{201C}", with: "\"")
-      .replacingOccurrences(of: "\u{201D}", with: "\"")
+  /// Caches the parsed and rendered Markdown so playback ticks do not re-parse it.
+  final class MarkdownCache {
+    private var markdown: String?
+    private var document: MarkdownDocument?
+    private var scale: CGFloat = 0
+    private var cached: MarkdownDocument.Rendered?
+
+    func rendered(for markdown: String, speech: String, scale: CGFloat) -> MarkdownDocument.Rendered? {
+      if markdown != self.markdown {
+        self.markdown = markdown
+        document = MarkdownDocument(markdown: markdown)
+        cached = nil
+      }
+      // The Markdown only applies while the text box still holds its speech text;
+      // any edit, paste or plain Service request switches back to plain text.
+      guard let document, document.speech == speech else { return nil }
+      if cached == nil || scale != self.scale {
+        self.scale = scale
+        cached = document.rendered(scale: scale)
+      }
+      return cached
+    }
   }
 
-  /// Finds a non-word token in text, considering alternatives created by preprocessing.
-  /// Preprocessing converts `(…)` → `- … -` and `word/word` → `word - word`, so a `-`
-  /// token may correspond to `(`, `)`, or `/` in the original text. Returns the closest match.
-  private func findNonWordToken(_ token: String, in text: String, from start: String.Index) -> Range<String.Index>? {
-    let searchRange = start..<text.endIndex
-    var best = text.range(of: token, range: searchRange)
+  @State private var markdownCache = MarkdownCache()
 
-    if token == "-" {
-      for alt in ["(", ")", "/"] {
-        if let altRange = text.range(of: alt, range: searchRange),
-           best == nil || altRange.lowerBound < best!.lowerBound {
-          best = altRange
-        }
-      }
+  /// The text shown during playback: rendered Markdown when the text came from kokoro-speak
+  /// with Markdown, otherwise the plain input text with no excluded ranges.
+  private func displayDocument() -> MarkdownDocument.Rendered {
+    if let markdown = viewModel.inputMarkdown,
+       let rendered = markdownCache.rendered(for: markdown, speech: viewModel.inputText, scale: textSize.scale) {
+      return rendered
     }
-
-    return best
-  }
-
-  /// Finds the next whole-word occurrence of `word` in `text` starting from `start`.
-  /// Prevents matching substrings inside longer words (e.g., "or" inside "for").
-  private func findWholeWord(_ word: String, in text: String, from start: String.Index) -> Range<String.Index>? {
-    var searchFrom = start
-    while let range = text.range(of: word, range: searchFrom..<text.endIndex) {
-      let beforeChar = range.lowerBound == text.startIndex ? nil : text[text.index(before: range.lowerBound)]
-      let afterChar = range.upperBound == text.endIndex ? nil : text[range.upperBound]
-      let beforeOK = beforeChar == nil || !(beforeChar!.isLetter || beforeChar!.isNumber)
-      let afterOK = afterChar == nil || !(afterChar!.isLetter || afterChar!.isNumber)
-      if beforeOK && afterOK {
-        return range
-      }
-      searchFrom = range.upperBound
-      if searchFrom >= text.endIndex { break }
-    }
-    return nil
+    let text = viewModel.inputText
+    return MarkdownDocument.Rendered(text: AttributedString(text), string: text, excluded: [], captions: [])
   }
 
   /// Builds an AttributedString with the current word highlighted, preserving original formatting.
   ///
-  /// Tokens come from preprocessed text (where parentheticals become dashes, etc.), so matching
-  /// uses whole-word search with Unicode normalization to handle mismatches. Characters between
-  /// spoken tokens (like parentheses) are filled in as spoken via gap-filling.
+  /// Tokens are matched by `TokenMatcher`. Characters between spoken tokens (like parentheses)
+  /// are filled in as spoken via gap-filling. Excluded ranges (code, tables, list markers)
+  /// keep their own color and are never filled.
   private func highlightedText() -> AttributedString {
-    let originalText = viewModel.inputText
-    var result = AttributedString(originalText)
+    let document = displayDocument()
+    var result = document.text
 
     // Default everything to dimmed (not yet spoken)
     result.foregroundColor = Color(nsColor: .tertiaryLabelColor)
 
-    // Normalize quotes for matching (smart quotes -> ASCII) since TTS may normalize them.
-    // This preserves character count so we can maintain parallel indices.
-    let searchText = Self.normalizeQuotes(originalText)
+    let matches = TokenMatcher.match(
+      viewModel.allTokens.map { $0.text }, in: document.string, excluding: document.excluded.map { $0.range })
 
-    // Maintain parallel positions in both original and normalized text
-    var normSearchStart = searchText.startIndex
-    var origSearchStart = originalText.startIndex
+    /// Colors a range as spoken; captions stay dimmer than body text.
+    func markSpoken(_ range: Range<String.Index>) {
+      if let attrRange = Range<AttributedString.Index>(range, in: result) {
+        result[attrRange].foregroundColor = Color(nsColor: .labelColor)
+      }
+      for caption in document.captions where caption.overlaps(range) {
+        let overlap = max(caption.lowerBound, range.lowerBound)..<min(caption.upperBound, range.upperBound)
+        if let attrRange = Range<AttributedString.Index>(overlap, in: result) {
+          result[attrRange].foregroundColor = Color(nsColor: .secondaryLabelColor)
+        }
+      }
+    }
 
     // Track end of last spoken region for gap filling
     var lastSpokenOrigEnd: String.Index?
 
     for (index, token) in viewModel.allTokens.enumerated() {
-      // Skip space tokens added between chunks
-      if token.text == " " { continue }
-
-      let normalizedToken = Self.normalizeQuotes(token.text)
-
-      // Use whole-word matching for tokens containing letters/numbers (prevents "or" matching
-      // inside "for"). For punctuation-only tokens (quotes, commas, etc.), use simple substring
-      // matching since they naturally appear adjacent to letters.
-      let tokenHasWordChars = normalizedToken.contains { $0.isLetter || $0.isNumber }
-      let range: Range<String.Index>?
-      if tokenHasWordChars {
-        range = findWholeWord(normalizedToken, in: searchText, from: normSearchStart)
-      } else {
-        range = findNonWordToken(normalizedToken, in: searchText, from: normSearchStart)
-      }
-
-      guard let range else {
-        // Token not found - likely a preprocessing artifact (e.g., "-" from converted parenthetical)
-        // or a Unicode mismatch. Skip it; gap-filling will color the skipped area when the next
-        // spoken token is found.
-        continue
-      }
-
-      // Map the match position to the original text using parallel character offsets
-      let skipCount = searchText.distance(from: normSearchStart, to: range.lowerBound)
-      let tokenLength = searchText.distance(from: range.lowerBound, to: range.upperBound)
-      let origMatchStart = originalText.index(origSearchStart, offsetBy: skipCount)
-      let origMatchEnd = originalText.index(origMatchStart, offsetBy: tokenLength)
-      let origRange = origMatchStart..<origMatchEnd
+      guard let origRange = matches[index] else { continue }
 
       let isCurrent = index == viewModel.currentTokenIndex
       let isSpoken = token.start_ts.map { $0 <= viewModel.currentTime } ?? false
@@ -192,75 +163,53 @@ struct ContentView: View {
       if isCurrent || isSpoken {
         // Fill gap: color characters between last spoken position and this token as spoken.
         // This handles parentheses, preprocessing artifacts, and any skipped characters.
-        if let lastEnd = lastSpokenOrigEnd, lastEnd < origMatchStart {
-          if let gapAttrRange = Range<AttributedString.Index>(lastEnd..<origMatchStart, in: result) {
-            result[gapAttrRange].foregroundColor = Color(nsColor: .labelColor)
-          }
+        if let lastEnd = lastSpokenOrigEnd, lastEnd < origRange.lowerBound {
+          markSpoken(lastEnd..<origRange.lowerBound)
         }
-        lastSpokenOrigEnd = origMatchEnd
+        lastSpokenOrigEnd = origRange.upperBound
       }
 
-      if let attrRange = Range<AttributedString.Index>(origRange, in: result) {
-        if isCurrent {
-          // Highlight the current word
+      if isCurrent {
+        // Highlight the current word
+        if let attrRange = Range<AttributedString.Index>(origRange, in: result) {
           result[attrRange].backgroundColor = Color.accentColor
           result[attrRange].foregroundColor = Color.white
-        } else if isSpoken {
-          // Already spoken - normal color
-          result[attrRange].foregroundColor = Color(nsColor: .labelColor)
         }
+      } else if isSpoken {
+        // Already spoken - normal color
+        markSpoken(origRange)
       }
+    }
 
-      // Move search positions forward
-      normSearchStart = range.upperBound
-      origSearchStart = origMatchEnd
+    // Excluded ranges are never spoken; gap-filling must not recolor them.
+    for excluded in document.excluded {
+      if let attrRange = Range<AttributedString.Index>(excluded.range, in: result) {
+        result[attrRange].foregroundColor = excluded.color
+      }
     }
 
     return result
   }
 
-  /// Returns the input text up to and including the current token, for measuring
-  /// the highlight's vertical position within the scroll view. Uses the same sequential
-  /// matching logic as `highlightedText()` to find the character offset.
-  private func textUpToCurrentToken() -> String {
-    let text = viewModel.inputText
+  /// Returns the displayed text up to and including the current token, for measuring
+  /// the highlight's vertical position within the scroll view. Keeps the rendered fonts
+  /// so headings measure at their real height.
+  private func textUpToCurrentToken() -> AttributedString {
     guard viewModel.currentTokenIndex >= 0,
           viewModel.currentTokenIndex < viewModel.allTokens.count else {
-      return ""
+      return AttributedString()
     }
+    let document = displayDocument()
+    let matches = TokenMatcher.match(
+      viewModel.allTokens.map { $0.text }, in: document.string, excluding: document.excluded.map { $0.range })
 
-    let searchText = Self.normalizeQuotes(text)
-    var searchStart = searchText.startIndex
-    var origStart = text.startIndex
-
-    for (index, token) in viewModel.allTokens.enumerated() {
-      if token.text == " " { continue }
-
-      let normalized = Self.normalizeQuotes(token.text)
-      let hasWords = normalized.contains { $0.isLetter || $0.isNumber }
-
-      let range: Range<String.Index>?
-      if hasWords {
-        range = findWholeWord(normalized, in: searchText, from: searchStart)
-      } else {
-        range = findNonWordToken(normalized, in: searchText, from: searchStart)
+    for index in viewModel.currentTokenIndex..<matches.count {
+      if let range = matches[index],
+         let attrRange = Range<AttributedString.Index>(document.string.startIndex..<range.upperBound, in: document.text) {
+        return AttributedString(document.text[attrRange])
       }
-
-      guard let range else { continue }
-
-      let skip = searchText.distance(from: searchStart, to: range.lowerBound)
-      let len = searchText.distance(from: range.lowerBound, to: range.upperBound)
-      let origEnd = text.index(origStart, offsetBy: skip + len)
-
-      if index >= viewModel.currentTokenIndex {
-        return String(text[..<origEnd])
-      }
-
-      searchStart = range.upperBound
-      origStart = origEnd
     }
-
-    return text
+    return document.text
   }
 
   /// Removes focus from the text editor so spacebar can control playback.

@@ -31,6 +31,7 @@
 				<string>NSRTFPboardType</string>
 				<string>NSStringPboardType</string>
 				<string>public.utf8-plain-text</string>
+				<string>net.daringfireball.markdown</string>
 			</array>
 			<key>NSKeyEquivalent</key>
 			<dict>
