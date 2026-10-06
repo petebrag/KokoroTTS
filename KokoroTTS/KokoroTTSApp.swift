@@ -11,7 +11,7 @@ struct KokoroTestApp: App {
       ContentView(viewModel: appDelegate.model)
         .frame(minWidth: 350, minHeight: 300)
     }
-    .defaultSize(width: 550, height: 550)
+    .defaultSize(width: 1100, height: 1000)
     .commands {
       CommandGroup(replacing: .appInfo) {
         Button(String(localized: "About Kokoro TTS")) {

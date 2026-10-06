@@ -132,8 +132,14 @@ struct ContentView: View {
     let document = displayDocument()
     var result = document.text
 
-    // Default everything to dimmed (not yet spoken)
-    result.foregroundColor = Color(nsColor: .tertiaryLabelColor)
+    // Text not yet spoken is only slightly lighter than spoken text, so it stays easy to
+    // read ahead. Captions ("Code block skipped.") start dimmer.
+    result.foregroundColor = Color(nsColor: .labelColor).opacity(0.65)
+    for caption in document.captions {
+      if let attrRange = Range<AttributedString.Index>(caption, in: result) {
+        result[attrRange].foregroundColor = Color(nsColor: .tertiaryLabelColor)
+      }
+    }
 
     let matches = TokenMatcher.match(
       viewModel.allTokens.map { $0.text }, in: document.string, excluding: document.excluded.map { $0.range })
